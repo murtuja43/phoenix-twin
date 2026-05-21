@@ -28,3 +28,4 @@ data/*.parquet
 
 # Streamlit
 .streamlit/secrets.toml
+data/sanity_check.png
