@@ -74,7 +74,7 @@ def _history_chart(history: pd.DataFrame, outcome: str) -> go.Figure:
         margin=dict(l=10, r=10, t=40, b=30),
         xaxis_title="Session",
         yaxis_title=f"{meta['label']}{meta['unit']}",
-        template="plotly_dark",
+        template="plotly_white",
         showlegend=False,
     )
     return fig
@@ -100,7 +100,7 @@ def _forecast_chart(history: pd.DataFrame, forecast_long: pd.DataFrame, outcome:
     fig.add_trace(go.Scatter(
         x=h["session_index"], y=h[outcome],
         mode="lines+markers",
-        line=dict(color="#94a3b8", width=2),
+        line=dict(color="#374151", width=2),
         marker=dict(size=5),
         name="Observed",
         hovertemplate=f"Session %{{x}}<br>Observed: %{{y:.1f}}{meta['unit']}<extra></extra>",
@@ -129,9 +129,9 @@ def _forecast_chart(history: pd.DataFrame, forecast_long: pd.DataFrame, outcome:
     ))
 
     # Vertical separator at forecast start
-    fig.add_vline(x=last_obs_x + 0.5, line_dash="dash", line_color="#475569",
+    fig.add_vline(x=last_obs_x + 0.5, line_dash="dash", line_color="#9ca3af",
                   annotation_text="forecast →", annotation_position="top right",
-                  annotation_font_color="#94a3b8", annotation_font_size=11)
+                  annotation_font_color="#6b7280", annotation_font_size=11)
 
     fig.update_layout(
         title=dict(text=f"{meta['label']}", font=dict(size=14)),
@@ -139,7 +139,7 @@ def _forecast_chart(history: pd.DataFrame, forecast_long: pd.DataFrame, outcome:
         margin=dict(l=10, r=10, t=40, b=30),
         xaxis_title="Session",
         yaxis_title=f"{meta['label']}{meta['unit']}",
-        template="plotly_dark",
+        template="plotly_white",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig
@@ -173,7 +173,7 @@ def _compare_chart(
     fig = go.Figure()
     # observed
     fig.add_trace(go.Scatter(x=h["session_index"], y=h[outcome], mode="lines+markers",
-                             line=dict(color="#94a3b8", width=2), marker=dict(size=4),
+                             line=dict(color="#374151", width=2), marker=dict(size=4),
                              name="Observed"))
     # Policy A
     fig.add_trace(go.Scatter(x=xa + xa[::-1], y=ya95 + ya05[::-1], fill="toself",
@@ -194,13 +194,13 @@ def _compare_chart(
                              marker=dict(size=5),
                              name=label_b))
 
-    fig.add_vline(x=last_obs_x + 0.5, line_dash="dash", line_color="#475569")
+    fig.add_vline(x=last_obs_x + 0.5, line_dash="dash", line_color="#9ca3af")
 
     fig.update_layout(
         title=dict(text=f"{meta['label']} — Policy A vs Policy B", font=dict(size=14)),
         height=340, margin=dict(l=10, r=10, t=40, b=30),
         xaxis_title="Session", yaxis_title=f"{meta['label']}{meta['unit']}",
-        template="plotly_dark",
+        template="plotly_white",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig
@@ -239,22 +239,23 @@ def render_simulation_tab():
 
         st.markdown(
             f"""
-            <div style="background: rgba(30,41,59,0.4); padding: 14px; border-radius: 10px;
-                        border-left: 3px solid #22d3ee; margin-top: 10px;">
-                <div style="color:#94a3b8; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">
+            <div style="background: #f9fafb; padding: 14px; border-radius: 10px;
+                        border-left: 3px solid #059669; margin-top: 10px;
+                        border: 1px solid #e5e7eb;">
+                <div style="color:#6b7280; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">
                     Patient Profile
                 </div>
-                <div style="margin-top:8px; font-size:0.9rem; line-height:1.6;">
+                <div style="margin-top:8px; font-size:0.9rem; line-height:1.6; color:#1f2937;">
                     <b>Baseline ROM:</b> {t.baseline_rom:.1f}°<br>
                     <b>Recovery target:</b> {t.target_rom:.1f}°<br>
                     <b>Adherence:</b> {t.adherence*100:.0f}%<br>
                     <b>Baseline HRV:</b> {t.baseline_hrv:.1f} ms
                 </div>
-                <hr style="border-color:#334155; margin: 10px 0;">
-                <div style="color:#94a3b8; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">
+                <hr style="border-color:#e5e7eb; margin: 10px 0;">
+                <div style="color:#6b7280; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">
                     Latest session
                 </div>
-                <div style="margin-top:8px; font-size:0.9rem; line-height:1.6;">
+                <div style="margin-top:8px; font-size:0.9rem; line-height:1.6; color:#1f2937;">
                     <b>ROM:</b> {last_rom:.1f}°<br>
                     <b>MQS:</b> {last_mqs:.1f}<br>
                     <b>HRV:</b> {last_hrv:.1f} ms
