@@ -62,31 +62,45 @@ class Forecast:
 def _build_features(history: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Turn a session log into (X, y) for training.
 
-    Features per session (the 'state' the model sees):
+    Targets are DELTAS (change from previous session), not absolute values.
+    This prevents the iterative rollout from flatlining and keeps forecasts
+    continuous with observed history.
+
+    Features per session:
       session_index, week, intensity_pct, volume_reps, prescribed_target_rom,
-      executed_load, cum_load, lag1_rom, lag1_mqs, lag1_hrv
+      executed_load, cum_load, lag1_rom, lag1_mqs, lag1_hrv,
+      rom_gap_to_target  (how far the patient is from their prescribed goal)
     """
     h = history.sort_values("session_index").reset_index(drop=True).copy()
 
-    # Lag features — what the patient's last session looked like
+    # Lag features
     for col in OUTCOMES:
         h[f"lag1_{col}"] = h[col].shift(1)
 
     # Cumulative load up to (but not including) this session
     h["cum_load"] = h["executed_load"].shift(1).fillna(0).cumsum()
 
-    # First session has no lags — fill with the patient's own first observed values
-    for col in OUTCOMES:
-        h[f"lag1_{col}"] = h[f"lag1_{col}"].fillna(h[col].iloc[0])
+    # Gap to prescribed target — a strong driver of how much ROM can still gain
+    h["rom_gap_to_target"] = h["prescribed_target_rom"] - h["lag1_rom_deg"]
+
+    # Compute deltas (target = change from previous session)
+    h["delta_rom_deg"] = h["rom_deg"] - h["lag1_rom_deg"]
+    h["delta_mqs"]     = h["mqs"]     - h["lag1_mqs"]
+    h["delta_hrv_ms"]  = h["hrv_ms"]  - h["lag1_hrv_ms"]
+
+    # Drop the first row (no lag available)
+    h = h.dropna(subset=[f"lag1_{c}" for c in OUTCOMES]).reset_index(drop=True)
 
     feature_cols = [
         "session_index", "week",
         "intensity_pct", "volume_reps", "prescribed_target_rom",
         "executed_load", "cum_load",
         "lag1_rom_deg", "lag1_mqs", "lag1_hrv_ms",
+        "rom_gap_to_target",
     ]
     X = h[feature_cols].copy()
-    y = h[OUTCOMES].copy()
+    y = h[[f"delta_{c}" for c in OUTCOMES]].copy()
+    y.columns = OUTCOMES  # rename so the rest of the pipeline can stay unchanged
     return X, y
 
 
@@ -154,15 +168,13 @@ def forecast(
 ) -> Forecast:
     """Roll the patient forward under a fixed policy for horizon_weeks weeks.
 
-    Returns a tidy long dataframe: one row per (session, outcome) with p05/p50/p95.
+    Predictions are DELTAS that we add to the running state, then we report
+    absolute p05/p50/p95 from the bootstrap ensemble at each session.
     """
     sessions_pw = policy.sessions_per_week()
     n_steps = horizon_weeks * sessions_pw
-
-    # Executed load under the new policy (assume adherence already baked into training)
     executed_load = (policy.intensity_pct / 100.0) * policy.volume_reps
 
-    # State we evolve forward, one session at a time
     prev = {col: float(model.last_history_row[col]) for col in OUTCOMES}
     cum_load = model.cum_load_at_end
     session_idx = model.last_session_index
@@ -171,11 +183,10 @@ def forecast(
     rows = []
     for step in range(1, n_steps + 1):
         session_idx += 1
-        # Advance week marker every `sessions_pw` sessions
         if (step - 1) % sessions_pw == 0 and step > 1:
             week += 1
         elif step == 1:
-            week += 1  # forecast starts in the next week
+            week += 1
 
         feat = pd.DataFrame([{
             "session_index": session_idx,
@@ -188,25 +199,34 @@ def forecast(
             "lag1_rom_deg": prev["rom_deg"],
             "lag1_mqs": prev["mqs"],
             "lag1_hrv_ms": prev["hrv_ms"],
+            "rom_gap_to_target": policy.target_rom - prev["rom_deg"],
         }])[model.feature_cols]
 
-        # Collect predictions from all bootstrap models, per outcome
-        preds_this_step = {}
+        # Collect DELTA predictions from all bootstrap models per outcome
+        deltas_this_step = {}
         for outcome in OUTCOMES:
-            preds = np.array([m.predict(feat)[0] for m in model.ensembles[outcome]])
-            preds_this_step[outcome] = preds
+            delta_preds = np.array([m.predict(feat)[0] for m in model.ensembles[outcome]])
+            deltas_this_step[outcome] = delta_preds
+            # Convert deltas to absolute values for reporting
+            abs_preds = prev[outcome] + delta_preds
             rows.append({
                 "session_index": session_idx,
                 "week": week,
                 "outcome": outcome,
-                "p05": float(np.percentile(preds, 5)),
-                "p50": float(np.percentile(preds, 50)),
-                "p95": float(np.percentile(preds, 95)),
+                "p05": float(np.percentile(abs_preds, 5)),
+                "p50": float(np.percentile(abs_preds, 50)),
+                "p95": float(np.percentile(abs_preds, 95)),
             })
 
-        # Roll the state forward using the median prediction
+        # Advance state using median delta
         for outcome in OUTCOMES:
-            prev[outcome] = float(np.percentile(preds_this_step[outcome], 50))
+            prev[outcome] = prev[outcome] + float(np.percentile(deltas_this_step[outcome], 50))
+
+        # Clip to physiological ranges so runaway predictions don't escape
+        prev["rom_deg"] = float(np.clip(prev["rom_deg"], 30, 150))
+        prev["mqs"]     = float(np.clip(prev["mqs"], 0, 100))
+        prev["hrv_ms"]  = float(np.clip(prev["hrv_ms"], 15, 100))
+
         cum_load += executed_load
 
     return Forecast(sessions=pd.DataFrame(rows))
