@@ -81,22 +81,25 @@ def simulate_session(
 ) -> dict:
     """Simulate one rehab session for one patient.
 
-    Recovery dynamics (simplified but realistic):
+    Recovery dynamics (calibrated for realistic 8-week post-op knee rehab):
       - ROM improves with executed load, asymptoting toward target_rom
-      - MQS improves with practice but drops when load × susceptibility is high
-      - HRV drops when recent load is high (under-recovery signal)
+      - MQS improves with practice but drops under overload
+      - HRV drops when cumulative load outpaces recovery
     """
     rx = sample_prescription(rng, week, traits)
     executed_load = (rx["intensity_pct"] / 100.0) * rx["volume_reps"] * traits.adherence
 
-    # ROM update: exponential approach to target, scaled by executed load
-    rom_gain = traits.recovery_rate * (executed_load / 30.0) * (traits.target_rom - prev_rom) / traits.target_rom
-    rom = prev_rom + rom_gain + rng.normal(0, traits.noise_level)
+    # ROM update: exponential approach to target.
+    # Load-response curve: peaks at moderate load (~25), drops off for very low or very high load.
+    load_response = np.exp(-((executed_load - 25) ** 2) / 400.0)  # bell curve centered at 25
+    rom_gain = traits.recovery_rate * load_response * (traits.target_rom - prev_rom) * 0.35
+    rom = prev_rom + rom_gain + rng.normal(0, traits.noise_level * 0.5)
     rom = float(np.clip(rom, traits.baseline_rom - 5, traits.target_rom + 5))
 
-    # MQS update: learns toward a ceiling, penalized by overload
+    # MQS update: tracks ROM progress, penalised by overload
     overload_penalty = max(0, executed_load - 35) * traits.fatigue_susceptibility
-    mqs_base = 50 + 35 * (rom - traits.baseline_rom) / max(1.0, traits.target_rom - traits.baseline_rom)
+    rom_progress = (rom - traits.baseline_rom) / max(1.0, traits.target_rom - traits.baseline_rom)
+    mqs_base = 50 + 35 * rom_progress
     mqs = mqs_base - overload_penalty * 0.4 + rng.normal(0, 3)
     mqs = float(np.clip(mqs, 0, 100))
 
